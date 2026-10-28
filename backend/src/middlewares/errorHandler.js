@@ -25,6 +25,8 @@ export function errorHandler(err, req, res, next) {
       code: isAppError ? err.code : 'INTERNAL_ERROR',
       // En producción no se filtran mensajes de errores inesperados
       message: isAppError || process.env.NODE_ENV !== 'production' ? err.message : 'Error interno del servidor',
+      // Lista de errores por campo (p. ej. validación de Zod)
+      ...(isAppError && err.details && { details: err.details }),
     },
   });
 }

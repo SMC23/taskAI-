@@ -4,6 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { notFound, errorHandler } from '../middlewares/errorHandler.js';
+import authRoutes from '../routes/auth.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -56,7 +57,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Aquí se montarán las rutas en el Paso 3 (auth, projects, tasks)
+app.use('/api/auth', authRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
