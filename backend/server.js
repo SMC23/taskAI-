@@ -1,11 +1,21 @@
 import app from './src/config/app.js';
 import { testConnection, closePool } from './src/config/database.js';
+import { validateAiConfig } from './src/services/ai/providers/index.js';
 
-const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'ANTHROPIC_API_KEY'];
+// La key de IA depende del proveedor elegido; la comprueba validateAiConfig()
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET'];
 
 const missing = REQUIRED_ENV.filter((name) => !process.env[name]);
 if (missing.length > 0) {
   console.error(`[server] Faltan variables de entorno: ${missing.join(', ')}. Revisa tu archivo .env`);
+  process.exit(1);
+}
+
+try {
+  const { provider, model } = validateAiConfig();
+  console.log(`[server] Proveedor de IA: ${provider} (modelo ${model})`);
+} catch (err) {
+  console.error(`[server] Configuración de IA inválida: ${err.message}`);
   process.exit(1);
 }
 

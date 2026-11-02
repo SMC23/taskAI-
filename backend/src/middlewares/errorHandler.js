@@ -17,7 +17,11 @@ export function errorHandler(err, req, res, next) {
   const statusCode = isAppError ? err.statusCode : 500;
 
   if (statusCode >= 500) {
-    console.error('[error]', err, err.cause ?? '');
+    // Una línea con lo esencial; no se vuelcan objetos completos (cabeceras, bodies)
+    // para no filtrar datos sensibles en los logs.
+    const cause = err.cause ? ` | causa: ${err.cause.name}: ${err.cause.message}` : '';
+    console.error(`[error] ${req.method} ${req.originalUrl} -> ${statusCode} ${err.code ?? err.name}: ${err.message}${cause}`);
+    if (!isAppError) console.error(err.stack); // errores inesperados: el stack ayuda a depurar
   }
 
   res.status(statusCode).json({

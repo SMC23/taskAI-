@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { AppError } from '../utils/errors.js';
 
 // trim + minúsculas ANTES de validar, para que " Ana@Mail.com " se guarde como "ana@mail.com"
 const emailField = z
@@ -30,26 +29,6 @@ export const loginSchema = z.object({
   password: z.string({ error: 'La contraseña es obligatoria' }).min(1, 'La contraseña es obligatoria'),
 });
 
-/**
- * Middleware que valida req.body contra un schema de Zod.
- * Si falla, envía un 400 al errorHandler con los errores en formato legible:
- *   [{ field: 'password', message: 'La contraseña debe tener al menos una mayúscula' }]
- * Si pasa, sustituye req.body por los datos ya limpios (trim, minúsculas) y continúa.
- */
-export function validate(schema) {
-  return (req, res, next) => {
-    const result = schema.safeParse(req.body ?? {});
-
-    if (!result.success) {
-      const err = new AppError('Datos de entrada inválidos', 400, 'VALIDATION_ERROR');
-      err.details = result.error.issues.map((issue) => ({
-        field: issue.path.join('.') || 'body',
-        message: issue.message,
-      }));
-      return next(err);
-    }
-
-    req.body = result.data;
-    next();
-  };
-}
+// El middleware vive en validate.js (lo comparten todos los validators); se
+// re-exporta aquí para que las rutas de auth lo importen junto a sus schemas.
+export { validate } from './validate.js';

@@ -64,7 +64,8 @@ export async function testConnection({ retries = 5, delayMs = 2_000 } = {}) {
       console.log(`[db] Conectado a "${rows[0].db}" (${rows[0].version.split(',')[0]})`);
       return true;
     } catch (err) {
-      console.error(`[db] Intento ${attempt}/${retries} fallido: ${err.message}`);
+      // Algunos errores de red (AggregateError) llegan sin message; el code (ECONNREFUSED...) sí
+      console.error(`[db] Intento ${attempt}/${retries} fallido: ${err.message || err.code || err.name}`);
       if (attempt === retries) {
         throw new Error('No se pudo conectar a PostgreSQL. Revisa DATABASE_URL y que el servidor esté activo.', {
           cause: err,

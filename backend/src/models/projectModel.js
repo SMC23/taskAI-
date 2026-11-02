@@ -52,18 +52,19 @@ export async function findById(id, userId) {
 }
 
 /**
- * Crea un proyecto. Acepta un `client` opcional para ejecutarse dentro de una
- * transacción (crear proyecto + tareas generadas por la IA de forma atómica).
+ * Crea un proyecto. Acepta un `id` opcional y un `client` opcional para ejecutarse
+ * dentro de una transacción (crear proyecto + tareas generadas por la IA de forma atómica).
  * @returns {Promise<object>}
  */
-export async function create({ userId, title, description = null, status = 'pending' }, client) {
+export async function create({ id = null, userId, title, description = null, status = 'pending' }, client) {
   try {
     const db = client ?? { query };
+    // COALESCE: usa el id recibido (generado antes para la auditoría de IA) o crea uno nuevo
     const { rows } = await db.query(
-      `INSERT INTO projects (user_id, title, description, status)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO projects (id, user_id, title, description, status)
+       VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5)
        RETURNING *`,
-      [userId, title.trim(), description, status],
+      [id, userId, title.trim(), description, status],
     );
     return rows[0];
   } catch (err) {

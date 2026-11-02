@@ -2,35 +2,10 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
 import { notFound, errorHandler } from '../middlewares/errorHandler.js';
+import { globalLimiter } from '../middlewares/rateLimiters.js';
 import authRoutes from '../routes/auth.js';
-
-const ONE_HOUR_MS = 60 * 60 * 1000;
-
-const rateLimitMessage = (message) => ({ error: { code: 'RATE_LIMITED', message } });
-
-/** Límite general para toda la API. */
-export const globalLimiter = rateLimit({
-  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  limit: Number(process.env.RATE_LIMIT_MAX) || 100,
-  standardHeaders: 'draft-8', // cabeceras RateLimit-* estándar
-  legacyHeaders: false,
-  message: rateLimitMessage('Demasiadas peticiones, inténtalo más tarde'),
-});
-
-/**
- * Límite estricto para los endpoints que llaman a la IA: 10 peticiones por hora
- * por IP. Cada llamada cuesta dinero, así que se aplica en la ruta de IA además
- * del límite global: router.post('/generate', aiLimiter, controller)
- */
-export const aiLimiter = rateLimit({
-  windowMs: ONE_HOUR_MS,
-  limit: 10,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: rateLimitMessage('Has alcanzado el límite de 10 generaciones con IA por hora'),
-});
+import projectRoutes from '../routes/projects.js';
 
 const app = express();
 
@@ -58,6 +33,7 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/projects', projectRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

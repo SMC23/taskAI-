@@ -9,10 +9,11 @@ import { toDbError, isInvalidInput } from '../utils/errors.js';
 export async function create({
   userId,
   projectId = null,
+  provider,
   model,
   promptTokens = 0,
   completionTokens = 0,
-  estimatedCostUsd = 0,
+  estimatedCostUsd = null, // null = modelo sin precio conocido
   latencyMs = null,
   status,
   errorMessage = null,
@@ -20,13 +21,14 @@ export async function create({
   try {
     const { rows } = await query(
       `INSERT INTO ai_audit_log
-         (user_id, project_id, model, prompt_tokens, completion_tokens, total_tokens,
+         (user_id, project_id, provider, model, prompt_tokens, completion_tokens, total_tokens,
           estimated_cost_usd, latency_ms, status, error_message)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
         userId,
         projectId,
+        provider,
         model,
         promptTokens,
         completionTokens,
