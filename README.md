@@ -188,6 +188,4 @@ No hay tests automatizados de las rutas HTTP, de la autenticación, de las consu
 - **Cuerpos de más de 100 KB.** Se rechazan con 500 en lugar de 413.
 - **Tipo de error de IA.** Se deduce del texto guardado; una columna `error_code` sería más fiable.
 
-## Lo que aprendí
 
-<!-- Escrito por el autor -->
