@@ -1,147 +1,193 @@
 # TaskAI
 
-Gestor de tareas inteligente: describes tu proyecto en lenguaje natural y la IA genera automáticamente una lista de tareas ordenadas y priorizadas.
+Gestor de tareas en el que describes un proyecto en lenguaje natural y una IA genera sus tareas, ordenadas y priorizadas.
 
-> Ejemplo: *"Quiero lanzar mi tienda online de ropa en 2 meses"* → TaskAI propone las tareas, su prioridad y su orden.
+## Capturas
 
-## Funcionalidades
+Todas las capturas usan datos de demostración creados con un script.
 
-1. Registro e inicio de sesión (JWT)
-2. Creación de proyectos a partir de una descripción en lenguaje natural
-3. Generación automática de tareas con la API de Anthropic (Claude)
-4. Completar, editar y eliminar tareas
-5. Dashboard con el progreso visual de cada proyecto
+![Panel de proyectos en escritorio: seis tarjetas con título, estado y barra de progreso](docs/img/dashboard.webp)
+
+![Detalle de un proyecto: progreso del 25 % y ocho tareas numeradas, cada una con prioridad y selector de estado](docs/img/detalle-proyecto.webp)
+
+![Panel de consumo de IA: tarjetas de llamadas, tokens, latencia, tasa de éxito y coste, gráfica de barras por día y tabla de últimas llamadas](docs/img/consumo.webp)
+
+| Inicio de sesión | Panel en móvil |
+|---|---|
+| <img src="docs/img/login.webp" width="480" alt="Formulario de inicio de sesión con los campos email y contraseña"> | <img src="docs/img/dashboard-movil.webp" width="220" alt="Panel de proyectos a 375 píxeles de ancho, con las tarjetas en una sola columna"> |
+
+## Qué demuestra este proyecto
+
+- **Tratar la salida de un modelo como entrada no confiable.** La respuesta se pide con un JSON Schema y se vuelve a validar con Zod: de 3 a 15 tareas, con límites de longitud y prioridad cerrada. Si no cumple, se responde 502 y no se guarda nada.
+- **Proveedores de IA intercambiables.** Gemini y Anthropic cumplen el mismo contrato y se eligen con `AI_PROVIDER`. Un test comprueba que cambiar de proveedor no toca `taskGenerator`.
+- **Auditoría de consumo.** Cada llamada, correcta o fallida, guarda tokens, coste estimado y latencia. El panel agrega en SQL: p95, serie diaria sin huecos y desglose por modelo.
+- **Autorización dentro de la consulta.** Cada lectura o escritura incluye al dueño en el propio SQL, y un recurso ajeno responde 404, igual que uno inexistente.
+- **Transacciones cortas alrededor de una llamada lenta.** La IA se invoca antes de abrir la transacción, para no retener una conexión del pool durante decenas de segundos.
+- **Interfaz accesible sin librerías extra.** Cambios optimistas con vuelta atrás si el servidor falla, y una gráfica en HTML y Tailwind con navegación por teclado y tabla para lectores de pantalla.
 
 ## Stack
 
-| Capa          | Tecnología                          |
-|---------------|-------------------------------------|
-| Frontend      | React, Vite, TailwindCSS, React Router |
-| Backend       | Node.js, Express                    |
-| Base de datos | PostgreSQL                          |
-| IA            | Anthropic API (Claude)              |
-| Auth          | JWT + bcrypt                        |
-| Despliegue    | AWS (planificado)                   |
+| Pieza | Por qué |
+|---|---|
+| React 19 + Vite 8 | Interfaz por componentes y arranque rápido en desarrollo |
+| Tailwind CSS 4 | Estilos en el propio componente, sin hojas CSS que mantener |
+| React Router 7 | Rutas públicas y protegidas en una SPA |
+| Node.js + Express 5 | Express 5 envía solo los errores de funciones `async` al manejador central |
+| PostgreSQL | Transacciones, `FILTER`, `percentile_cont` y `generate_series` para las métricas |
+| `pg` (sin ORM) | SQL explícito y parametrizado, visible en los modelos |
+| node-pg-migrate | Migraciones versionadas con `up` y `down` |
+| Zod 4 | Una sola librería para validar peticiones y salida de la IA, y para generar el JSON Schema |
+| jsonwebtoken + bcryptjs | Sesión sin estado y contraseñas con hash; bcryptjs no requiere compilación nativa |
+| helmet + express-rate-limit | Cabeceras de seguridad y límites por IP |
+| `@google/genai` + `@anthropic-ai/sdk` | Los dos proveedores de IA soportados |
+| Vitest + ESLint | Tests del backend y análisis estático del frontend |
 
-## Estructura
+## Arquitectura
 
-```
-taskAI/
-├── backend/                 API REST (Express)
-│   ├── migrations/          Migraciones SQL versionadas (node-pg-migrate)
-│   ├── tests/               Tests de la API (Vitest + Supertest)
-│   └── src/
-│       ├── config/          Variables de entorno, conexión a la BD
-│       ├── routes/          Definición de endpoints
-│       ├── controllers/     Manejo de request/response
-│       ├── services/        Lógica de negocio
-│       │   └── ai/          Integración con Anthropic
-│       ├── models/          Acceso a datos (consultas SQL)
-│       ├── middlewares/     Auth JWT, errores, rate limiting
-│       ├── validators/      Esquemas de validación (Zod)
-│       └── utils/           Utilidades compartidas
-├── frontend/                SPA (React + Vite)
-│   ├── public/              Archivos estáticos
-│   └── src/
-│       ├── api/             Cliente HTTP y llamadas a la API
-│       ├── assets/          Imágenes, iconos
-│       ├── components/      Componentes reutilizables (ui, layout, tasks, projects)
-│       ├── context/         Estado global (sesión del usuario)
-│       ├── hooks/           Custom hooks
-│       ├── pages/           Vistas (Login, Dashboard, Proyecto…)
-│       ├── routes/          Rutas y rutas protegidas
-│       └── utils/           Utilidades
-└── docs/                    Documentación técnica
+```mermaid
+flowchart TD
+    Browser["Navegador<br/>React + Vite"] -->|"HTTP + JWT"| Routes
+
+    subgraph API["API Express"]
+        Routes["routes<br/>authenticate, rate limit, validate"] --> Controllers["controllers<br/>HTTP: petición y respuesta"]
+        Controllers --> Services["services<br/>lógica de negocio"]
+        Services --> Models["models<br/>único acceso a SQL"]
+        Services --> Generator["taskGenerator<br/>prompt, validación y auditoría"]
+        Generator --> Factory["providers/index<br/>elige según AI_PROVIDER"]
+        Generator --> Models
+        Factory --> Gemini["geminiProvider"]
+        Factory --> Anthropic["anthropicProvider"]
+    end
+
+    Models --> DB[("PostgreSQL")]
+    Gemini --> GeminiAPI["API de Gemini"]
+    Anthropic --> AnthropicAPI["API de Anthropic"]
 ```
 
-## Requisitos
+Capas, flujo de una petición y creación de un proyecto paso a paso en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md). Referencia en [docs/API.md](docs/API.md) y [docs/BASE_DE_DATOS.md](docs/BASE_DE_DATOS.md).
 
-- Node.js 20.19 o superior
-- PostgreSQL 15 o superior
-- Una API key de Anthropic
+## Decisiones de diseño
 
-## Puesta en marcha (cuando exista el código)
+Registro completo, con alternativas, en [docs/DECISIONES.md](docs/DECISIONES.md).
+
+- **Capa de IA intercambiable.** Cada proveedor recibe `{ systemPrompt, userPrompt, jsonSchema }` y devuelve `{ text, usage, model }`, y traduce sus errores a unos comunes. Así el resto del sistema no conoce ningún SDK, y añadir un proveedor no obliga a cambiar `taskGenerator`.
+- **Validación de la salida con Zod.** Un JSON con la forma correcta puede traer datos inválidos, y el fallo aparecería días después. El mismo esquema Zod genera el JSON Schema enviado al modelo y valida la respuesta, de modo que no pueden desalinearse.
+- **Auditoría de consumo.** Cada llamada tiene coste, también las fallidas si llegaron a consumir tokens. El coste es `NULL` si el modelo no tiene precio conocido, y no 0: desconocido y gratuito son cosas distintas.
+- **Transacciones.** El proyecto y sus tareas se insertan juntos o no se inserta ninguno. La llamada a la IA queda fuera porque tarda segundos y el pool tiene 10 conexiones por defecto.
+- **Protección contra IDOR.** El `UPDATE` o `DELETE` lleva la comprobación del dueño en la misma sentencia, sin una lectura previa. Un recurso ajeno da 404 para no revelar qué ids existen.
+- **Login resistente a enumeración.** La respuesta es idéntica si el email no existe o si la contraseña es incorrecta, y `bcrypt.compare` se ejecuta siempre, contra un hash ficticio si hace falta, para que el tiempo tampoco lo revele. El registro sí revela si un email existe; ver [Seguridad](#seguridad).
+
+## Seguridad
+
+Amenazas y mitigaciones en [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
+
+**Implementado**
+
+- Contraseñas con bcrypt (12 rondas por defecto) y política mínima: de 8 a 72 caracteres, con mayúscula, minúscula y número.
+- JWT con algoritmo fijado a HS256 y caducidad de 7 días.
+- Validación con Zod de cuerpo, parámetros y query; SQL siempre parametrizado.
+- Comprobación del dueño en las consultas de proyectos y tareas; el consumo se filtra por el usuario del token.
+- Límites por IP: 100 peticiones cada 15 min en general, 20 de login o registro cada 15 min y 10 generaciones con IA por hora.
+- helmet, CORS limitado a `CLIENT_URL` y cuerpo JSON de hasta 100 KB.
+- El detalle técnico de los errores de IA se queda en la base de datos; el usuario solo ve un mensaje genérico.
+
+**No implementado**
+
+- El token se guarda en `localStorage`, legible por cualquier script si hubiera un XSS. La alternativa es una cookie `httpOnly` con `Secure` y `SameSite`, lo que exige cambiar el backend y añadir protección CSRF.
+- Cerrar sesión solo borra el token del navegador: sigue siendo válido hasta que caduca. No hay lista de revocación ni refresh tokens.
+- El registro responde 409 si el email ya existe, así que permite comprobar qué emails están registrados.
+- No hay verificación de email ni recuperación de contraseña.
+- Los límites son por IP y se guardan en memoria: se reinician con el servidor y no se comparten entre instancias.
+- El servidor no gestiona HTTPS y el proyecto no está desplegado.
+
+## Cómo correrlo localmente
+
+Requisitos: Node.js 20.19 o superior y PostgreSQL con `psql` en el `PATH`. Probado con una copia limpia del repositorio en Windows 11, Node 22.14 y PostgreSQL 16.15.
+
+**1. Instalar dependencias**
 
 ```bash
-# Backend
-cd backend
-cp .env.example .env      # rellena los valores
-npm install
-npm run migrate:up
-npm run dev               # http://localhost:4000
-
-# Frontend (en otra terminal)
-cd frontend
-cp .env.example .env
-npm install
-npm run dev               # http://localhost:5173
+cd backend && npm ci
+cd ../frontend && npm ci
+cd ..
 ```
 
-## Estado
+**2. Crear la base de datos** (desde la raíz; pedirá la contraseña de `postgres`)
 
-🚧 Paso 1 completado: estructura y configuración inicial.
+```bash
+psql -U postgres -c "CREATE USER taskai_user WITH PASSWORD 'cambia_esta_password';"
+psql -U postgres -c "CREATE DATABASE taskai OWNER taskai_user;"
+```
 
+**3. Configurar las variables de entorno**
 
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
 
-## Notas mias , entendimiento 
-taskAI/
-├── .gitignore
-├── README.md
-├── docs/
-├── backend/
-│   ├── package.json
-│   ├── .env.example
-│   ├── migrations/
-│   ├── tests/
-│   └── src/{config, routes, controllers, services/ai, models, middlewares, validators, utils}
-└── frontend/
-    ├── package.json
-    ├── .env.example
-    ├── public/
-    └── src/{api, assets, components/{ui,layout,tasks,projects}, context, hooks, pages, routes, utils}
+En `backend/.env` cambia estos valores:
 
-Para el backend 
- las rutas - sirven para dirijirlos a la peticion http , donde recibe y enviea peticiones 
---services- ya es la logica como tal , valida los datos y despues se llama a ala ia y luego guarda las tareas generadas , no hace nada de http  ni sql 
+| Variable | Valor |
+|---|---|
+| `DATABASE_URL` | La conexión del paso 2. Con los valores de ejemplo no hay que tocarla |
+| `JWT_SECRET` | El resultado de `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` |
+| `GEMINI_API_KEY` | Una clave de [Google AI Studio](https://aistudio.google.com/apikey) |
 
--models - es el unico que habal con la base dee datos y hace querys 
+Sin una clave válida la aplicación arranca, pero crear un proyecto responde 503. Para usar Anthropic, pon `AI_PROVIDER=anthropic` y rellena `ANTHROPIC_API_KEY`.
 
-Esto se llama separación de responsabilidades y es lo que separa código profesional de código de tutorial.
- 
+En el nivel gratuito, Google puede usar el contenido enviado para mejorar sus productos: no escribas datos sensibles en las descripciones.
 
+**4. Aplicar las migraciones**
 
- al correr el backed hya un error comun que es el attach muy comun 
- para ejcutar el servidor sin importar se hace de la siguienete manera Ñode --env-file=.env server.js
-ÑCreé .vscode/settings.json, que pone el Auto Attach en "Only With Flag" solo para este proyecto. Ya no interferirá con npm run dev, y el depurador se sigue pudiendo usar cuando lo pidas expresamente con --inspect. El .gitignore del Paso 1 ya permite subir este archivo, así que la configuración viaja con el repo.
+```bash
+cd backend && npm run migrate:up
+cd ..
+```
 
-Para que se aplique, cierra la terminal actual, abre una nueva y ejecuta npm run dev dentro de backend. Con --watch, el servidor se reiniciará solo cada vez que guardes un archivo.
- solucion 
+**5. Arrancar** (cada línea en su propia terminal, desde la raíz)
 
+```bash
+cd backend && npm run dev     # http://localhost:4000
+cd frontend && npm run dev    # http://localhost:5173
+```
 
- zod sirve para transformar o vallidar un formato que tenaga aya por defecto
- Añade lo más peligroso: un JSON que parece válido pero con datos mal formados puede guardarse en la base de datos y el problema aparece días después. Y la idea de fondo: la IA es una fuente externa, y a las fuentes externas no se les confía ciegamente, igual que al usuario. 
- Pregunta 1: bien, pero te falta la parte clave.
-Dijiste que la transacción permite hacer rollback si algo falla. Eso es correcto. Lo que falta es por qué importa aquí: un proyecto sin tareas es un estado roto. Si se guarda el proyecto y falla el guardado de las tareas, el usuario ve un proyecto vacío que nunca pidió. La transacción garantiza todo o nada. En entrevista, la frase corta es: “para que nunca quede un proyecto a medias en la base de datos”.
+Comprueba la API con `curl http://localhost:4000/api/health`. El frontend usa siempre el puerto 5173 porque es el origen que CORS permite por defecto.
 
+Si Gemini responde que el modelo está saturado, cambia `GEMINI_MODEL` por otro de los que indica `.env.example`.
 
-“Para que un atacante no pueda descubrir qué emails están registrados.” estsos e hace dana,do una repsusta en negativo de el correo y la contrasena 
+## Pruebas
 
-jwt 
-Piensa en una manilla de concierto con un sello holográfico.
+```bash
+cd backend
+npm test           # 38 tests con Vitest
+cd ../frontend
+npm run lint       # ESLint
+npm run build      # build de producción
+```
 
-La manilla dice quién eres y hasta cuándo vale. Cualquiera puede leerla. Pero el sello holográfico solo lo puede hacer el organizador. Si alguien intenta falsificar la manilla o cambiarle el nombre, el sello no coincide y el guardia la rechaza.
+Los tests no llaman a ninguna API externa ni necesitan base de datos. Cubren:
 
-Un JWT tiene tres partes:
+- Fábrica de proveedores y validación de la configuración, sin mostrar claves.
+- Gemini: parámetros de la petición, reintentos ante 503, errores sin reintento, clave inválida y respuesta cortada.
+- Anthropic: traducción de errores y respuesta cortada.
+- `taskGenerator`: JSON válido, JSON roto, esquema inválido, respuesta cortada, error inesperado, y que un fallo de auditoría no oculte el resultado.
+- Precios: modelo sin precio y precio vigente según la fecha.
+- Panel de consumo: clasificación de errores y que `error_message` nunca salga del servidor.
 
-Cabecera: el algoritmo usado.
-Payload: los datos. En el tuyo: tu userId, cuándo se emitió y cuándo caduca (7 días).
-Firma: el sello. Se calcula con tu JWT_SECRET, que solo conoce el servidor.
+No hay tests automatizados de las rutas HTTP, de la autenticación, de las consultas SQL ni del frontend. Esos flujos se verificaron a mano durante el desarrollo, con `curl` y Chrome sin interfaz, pero esas comprobaciones no forman parte del repositorio.
 
-las fuentes exterenas no se les confia directaamente 
+## Limitaciones conocidas y próximos pasos
 
-La firma se calcula una vez, al crear el token, mezclando el header y el payload con el JWT_SECRET, que solo conoce el servidor.
-Te faltó también la segunda mitad de la pregunta: quién puede leerlo. Cualquiera que tenga el token puede leer el payload, porque está codificado y no cifrado. Pero solo el servidor puede crear uno válido.
+- **Generación en segundo plano.** La petición queda abierta mientras la IA responde. Si se cierra la pestaña, el servidor termina y guarda el proyecto, pero el usuario no recibe la respuesta. Un trabajo en segundo plano con consulta de estado lo resolvería.
+- **Idempotencia.** El frontend evita el doble envío, pero repetir la petición crea otro proyecto y gasta otra llamada. Una clave de idempotencia por intento lo evitaría.
+- **Despliegue.** No está desplegado. El código ya contempla `TRUST_PROXY`, SSL en la base de datos y apagado ordenado con `SIGTERM`.
+- **Límites compartidos y por usuario.** Requieren un almacén común como Redis.
+- **Más cobertura de tests.** Sobre todo las rutas HTTP y el aislamiento entre usuarios.
+- **Funciones ausentes.** No se pueden editar los textos de una tarea, añadir tareas a mano ni borrar proyectos.
+- **Cuerpos de más de 100 KB.** Se rechazan con 500 en lugar de 413.
+- **Tipo de error de IA.** Se deduce del texto guardado; una columna `error_code` sería más fiable.
 
+## Lo que aprendí
 
-
-zod se utiliza para aavalidar un json aya que la repsuesta de un
+<!-- Escrito por el autor -->
