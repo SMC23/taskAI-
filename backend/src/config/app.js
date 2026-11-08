@@ -6,6 +6,8 @@ import { notFound, errorHandler } from '../middlewares/errorHandler.js';
 import { globalLimiter } from '../middlewares/rateLimiters.js';
 import authRoutes from '../routes/auth.js';
 import projectRoutes from '../routes/projects.js';
+import taskRoutes from '../routes/tasks.js';
+import usageRoutes from '../routes/usage.js';
 
 const app = express();
 
@@ -21,6 +23,8 @@ app.use(
     origin: process.env.CLIENT_URL || 'http://localhost:5173',
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    // Sin esto el navegador oculta Retry-After al frontend (no es una cabecera "segura" de CORS)
+    exposedHeaders: ['Retry-After'],
   }),
 );
 app.use(express.json({ limit: '100kb' })); // evita bodies gigantes
@@ -34,6 +38,8 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/usage', usageRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

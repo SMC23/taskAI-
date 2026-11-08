@@ -9,13 +9,13 @@ export function formatZodIssues(issues) {
 }
 
 /**
- * Middleware que valida req.body contra un schema de Zod.
+ * Middleware que valida req.body (o req.params / req.query con source) contra un schema de Zod.
  * Si falla, envía un 400 al errorHandler con los errores en formato legible.
- * Si pasa, sustituye req.body por los datos ya limpios (trim, minúsculas) y continúa.
+ * Si pasa, sustituye los datos por los ya limpios (trim, minúsculas) y continúa.
  */
-export function validate(schema) {
+export function validate(schema, source = 'body') {
   return (req, res, next) => {
-    const result = schema.safeParse(req.body ?? {});
+    const result = schema.safeParse(req[source] ?? {});
 
     if (!result.success) {
       const err = new AppError('Datos de entrada inválidos', 400, 'VALIDATION_ERROR');
@@ -23,7 +23,8 @@ export function validate(schema) {
       return next(err);
     }
 
-    req.body = result.data;
+    // En Express 5 req.query es un getter sin setter: asignarlo lanzaría un TypeError
+    Object.defineProperty(req, source, { value: result.data, writable: true, configurable: true, enumerable: true });
     next();
   };
 }

@@ -54,3 +54,21 @@ export function validateRegister({ name, email, password }) {
     password: validateNewPassword(password),
   });
 }
+
+export const PROJECT_LIMITS = { titleMin: 3, titleMax: 100, descriptionMin: 20, descriptionMax: 2000 };
+
+export function validateProject({ title, description }) {
+  const cleanTitle = title.trim();
+  const cleanDescription = description.trim();
+  let titleError = null;
+  if (!cleanTitle) titleError = t.validation.titleRequired;
+  else if (cleanTitle.length < PROJECT_LIMITS.titleMin) titleError = t.validation.titleMin;
+  else if (cleanTitle.length > PROJECT_LIMITS.titleMax) titleError = t.validation.titleMax;
+
+  let descriptionError = null;
+  if (!cleanDescription) descriptionError = t.validation.descriptionRequired;
+  else if (cleanDescription.length < PROJECT_LIMITS.descriptionMin) descriptionError = t.validation.descriptionMin;
+  else if (cleanDescription.length > PROJECT_LIMITS.descriptionMax) descriptionError = t.validation.descriptionMax;
+
+  return compact({ title: titleError, description: descriptionError });
+}

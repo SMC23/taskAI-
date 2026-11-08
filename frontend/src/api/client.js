@@ -9,12 +9,13 @@ if (!API_URL) {
 
 /** Error de la API con un mensaje legible y los errores por campo del backend. */
 export class ApiError extends Error {
-  constructor({ status, code, message, details = [] }) {
+  constructor({ status, code, message, details = [], retryAfter = null }) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.details = details;
+    this.retryAfter = retryAfter; // segundos de espera indicados por el backend (429)
   }
 
   /** { campo: mensaje } con el primer error de cada campo (array details del backend). */
@@ -85,5 +86,6 @@ export async function apiRequest(path, { method = 'GET', body, auth = true, sign
     code,
     message: t.errors[code] ?? error.message ?? t.errors.UNKNOWN,
     details: Array.isArray(error.details) ? error.details : [],
+    retryAfter: Number(response.headers.get('Retry-After')) || null,
   });
 }

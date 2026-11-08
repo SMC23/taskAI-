@@ -40,15 +40,13 @@ export async function getUserProjects(userId) {
   }));
 }
 
-/**
- * Proyecto con todas sus tareas. Responde 404 tanto si no existe como si es de
- * otro usuario, para no revelar qué ids existen.
- */
+// 404 tanto si no existe como si es de otro usuario, para no revelar qué ids existen
+const projectNotFound = () => new AppError('Project not found', 404, 'PROJECT_NOT_FOUND');
+
+/** Proyecto con todas sus tareas. */
 export async function getProjectById(userId, projectId) {
   const project = await projectModel.findById(projectId, userId);
-  if (!project) {
-    throw new AppError('Project not found', 404, 'PROJECT_NOT_FOUND');
-  }
+  if (!project) throw projectNotFound();
 
   const tasks = await taskModel.findByProjectId(project.id);
   const completed = tasks.filter((task) => task.status === 'completed').length;
@@ -57,4 +55,11 @@ export async function getProjectById(userId, projectId) {
     project: { ...project, total_tasks: tasks.length, completed_tasks: completed, progress: progressOf(tasks.length, completed) },
     tasks,
   };
+}
+
+/** Cambia el estado de un proyecto del usuario. */
+export async function updateProjectStatus(userId, projectId, status) {
+  const project = await projectModel.updateStatus(projectId, userId, status);
+  if (!project) throw projectNotFound();
+  return project;
 }

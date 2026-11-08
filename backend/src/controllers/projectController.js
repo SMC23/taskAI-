@@ -19,3 +19,9 @@ export async function getOne(req, res) {
   const { project, tasks } = await projectService.getProjectById(req.userId, req.params.id);
   res.json({ project, tasks });
 }
+
+/** PATCH /api/projects/:id → 200 { project } */
+export async function updateStatus(req, res) {
+  const project = await projectService.updateProjectStatus(req.userId, req.params.id, req.body.status);
+  res.json({ project });
+}

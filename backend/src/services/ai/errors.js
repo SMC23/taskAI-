@@ -19,6 +19,26 @@ export class AiError extends AppError {
   }
 }
 
+const INVALID_RESPONSE_PREFIX = 'La IA devolvió una respuesta inválida';
+
+/**
+ * Tipo genérico de un error de ai_audit_log, para mostrarlo al usuario sin exponer el detalle técnico.
+ * La tabla solo guarda el texto, así que se deduce de los formatos de auditMessage que generan
+ * este archivo y los proveedores: "<http|network>: detalle" o el prefijo de respuesta inválida.
+ * @returns {'unavailable'|'invalid_response'|'request_failed'|'unknown'}
+ */
+export function classifyAuditError(message) {
+  if (!message) return 'unknown';
+  if (message.startsWith(INVALID_RESPONSE_PREFIX)) return 'invalid_response';
+  if (message.startsWith('network:')) return 'unavailable';
+
+  const status = Number(message.match(/^(\d{3}):/)?.[1]);
+  if (!status) return 'unknown';
+  // Mismos criterios que translateError en los proveedores (Google da 400 si la key es inválida)
+  const unavailable = status === 401 || status === 403 || status === 429 || status >= 500 || message.includes('API_KEY_INVALID');
+  return unavailable ? 'unavailable' : 'request_failed';
+}
+
 /** Autenticación, cuota, rate limit, red o servicio caído → 503 */
 export const aiUnavailable = (meta) =>
   new AiError('El servicio de IA no está disponible en este momento, inténtalo más tarde', 503, 'AI_UNAVAILABLE', meta);
@@ -28,7 +48,7 @@ export const aiRequestFailed = (meta) => new AiError('El servicio de IA devolvi�
 
 /** La respuesta llegó pero no se puede usar → 502 */
 export const aiInvalidResponse = (reason, meta) =>
-  new AiError(`La IA devolvió una respuesta inválida: ${reason}`, 502, 'AI_INVALID_RESPONSE', meta);
+  new AiError(`${INVALID_RESPONSE_PREFIX}: ${reason}`, 502, 'AI_INVALID_RESPONSE', meta);
 
 /** La respuesta se cortó por el límite de tokens */
 export const aiTruncated = (meta) => aiInvalidResponse('la respuesta se cortó por exceder el límite de tokens', meta);

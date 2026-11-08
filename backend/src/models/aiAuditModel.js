@@ -86,3 +86,90 @@ export async function findByUserId(userId, { limit = 50, offset = 0 } = {}) {
     throw toDbError(err, 'Error al consultar auditoría de IA');
   }
 }
+
+// Llamadas del usuario dentro del periodo [$2, $3], fechas 'YYYY-MM-DD' interpretadas en UTC.
+// Es un fragmento fijo: los valores van siempre como parámetros.
+const IN_PERIOD = `user_id = $1
+          AND created_at >= ($2::timestamp AT TIME ZONE 'UTC')
+          AND created_at < (($3::timestamp + interval '1 day') AT TIME ZONE 'UTC')`;
+
+/**
+ * Agregados de consumo de IA de un usuario en un periodo (días UTC, ambos incluidos).
+ * @param {string} userId id del token, nunca un parámetro del cliente
+ * @param {{from: string, to: string}} period fechas 'YYYY-MM-DD'
+ * @returns {Promise<{totals: object, daily: object[], byModel: object[], recentCalls: object[]}>}
+ */
+export async function getUsageSummary(userId, { from, to }) {
+  const params = [userId, from, to];
+
+  try {
+    // Totales y latencia. SUM ignora los costes NULL; la latencia solo cuenta las llamadas exitosas.
+    // free_calls: coste 0 con tokens consumidos (un fallo sin tokens también da coste 0 y no es nivel gratuito).
+    const totalsQuery = query(
+      `SELECT COUNT(*)                                                            AS calls,
+              COUNT(*) FILTER (WHERE status = 'success')                          AS successful_calls,
+              COUNT(*) FILTER (WHERE status = 'error')                            AS failed_calls,
+              COALESCE(SUM(prompt_tokens), 0)                                     AS prompt_tokens,
+              COALESCE(SUM(completion_tokens), 0)                                 AS completion_tokens,
+              COALESCE(SUM(total_tokens), 0)                                      AS total_tokens,
+              COALESCE(SUM(estimated_cost_usd), 0)                                AS total_cost_usd,
+              COUNT(*) FILTER (WHERE estimated_cost_usd IS NULL)                  AS unknown_cost_calls,
+              COUNT(*) FILTER (WHERE estimated_cost_usd = 0 AND total_tokens > 0) AS free_calls,
+              ROUND(AVG(latency_ms) FILTER (WHERE status = 'success'))            AS avg_latency_ms,
+              ROUND(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)
+                    FILTER (WHERE status = 'success'))                            AS p95_latency_ms
+         FROM ai_audit_log
+        WHERE ${IN_PERIOD}`,
+      params,
+    );
+
+    // Serie diaria: generate_series crea todos los días y el LEFT JOIN deja a cero los que no tienen llamadas.
+    // Los ::timestamp son necesarios: con date, generate_series usaría la zona horaria de la sesión.
+    const dailyQuery = query(
+      `SELECT to_char(d.day, 'YYYY-MM-DD')     AS date,
+              COUNT(l.id)                      AS calls,
+              COALESCE(SUM(l.total_tokens), 0) AS tokens
+         FROM generate_series($2::timestamp, $3::timestamp, interval '1 day') AS d(day)
+         LEFT JOIN ai_audit_log l
+           ON l.user_id = $1
+          AND l.created_at >= (d.day AT TIME ZONE 'UTC')
+          AND l.created_at < ((d.day + interval '1 day') AT TIME ZONE 'UTC')
+        GROUP BY d.day
+        ORDER BY d.day`,
+      params,
+    );
+
+    // Desglose por proveedor y modelo, con los más usados primero
+    const byModelQuery = query(
+      `SELECT provider,
+              model,
+              COUNT(*)                                           AS calls,
+              COUNT(*) FILTER (WHERE status = 'success')         AS successful_calls,
+              COUNT(*) FILTER (WHERE status = 'error')           AS failed_calls,
+              COALESCE(SUM(total_tokens), 0)                     AS total_tokens,
+              COALESCE(SUM(estimated_cost_usd), 0)               AS total_cost_usd,
+              COUNT(*) FILTER (WHERE estimated_cost_usd IS NULL) AS unknown_cost_calls
+         FROM ai_audit_log
+        WHERE ${IN_PERIOD}
+        GROUP BY provider, model
+        ORDER BY calls DESC, provider, model`,
+      params,
+    );
+
+    // Últimas 10 llamadas del periodo (usa el índice user_id + created_at DESC)
+    const recentCallsQuery = query(
+      `SELECT id, created_at, provider, model, prompt_tokens, completion_tokens, total_tokens,
+              latency_ms, status, error_message
+         FROM ai_audit_log
+        WHERE ${IN_PERIOD}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 10`,
+      params,
+    );
+
+    const [totals, daily, byModel, recentCalls] = await Promise.all([totalsQuery, dailyQuery, byModelQuery, recentCallsQuery]);
+    return { totals: totals.rows[0], daily: daily.rows, byModel: byModel.rows, recentCalls: recentCalls.rows };
+  } catch (err) {
+    throw toDbError(err, 'Error al consultar el consumo de IA');
+  }
+}
